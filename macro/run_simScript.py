@@ -24,6 +24,17 @@ theProductionCouplings = theDecayCouplings = None
 # Default dark photon parameters
 theDPmass    = 0.2*u.GeV
 
+
+# ///////////////////////////////////////////////////////////
+
+#Default dark scalar parameters
+theDSmass    = 3.0*u.GeV
+
+#Shall I create theDScouplings?
+
+# ///////////////////////////////////////////////////////////
+
+
 # Alpaca
 motherMode = True
 
@@ -72,7 +83,7 @@ parser.add_argument("--MuDIS",     dest="mudis",  help="Use muon deep inelastic 
 parser.add_argument("--RpvSusy", dest="RPVSUSY",  help="Generate events based on RPV neutralino", required=False, action="store_true")
 parser.add_argument("--DarkPhoton", dest="DarkPhoton",  help="Generate dark photons", required=False, action="store_true")
 parser.add_argument("--SusyBench", dest="RPVSUSYbench",  help="Generate HP Susy", required=False, default=2)
-parser.add_argument("-m", "--mass", dest="theMass",  help="Mass of hidden particle, default "+str(theHNLMass)+"GeV for HNL, "+str(theDPmass)+"GeV for DP", required=False, default=None, type=float)
+parser.add_argument("-m", "--mass", dest="theMass",  help="Mass of hidden particle, default "+str(theHNLMass)+"GeV for HNL, "+str(theDPmass)+"GeV for DP, "+str(theDSmass)+"GeV for DS", required=False, default=None, type=float)
 parser.add_argument("-c", "--couplings", "--coupling", dest="thecouplings",  help="couplings \'U2e,U2mu,U2tau\' or -c \'U2e,U2mu,U2tau\' to set list of HNL couplings.\
  TP default for HNL, ctau=53.3km", required=False,default="0.447e-9,7.15e-9,1.88e-9")
 parser.add_argument("-cp", "--production-couplings", dest="theprodcouplings",  help="production couplings \'U2e,U2mu,U2tau\' to set the couplings for HNL production only"\
@@ -109,6 +120,11 @@ parser.add_argument("-D", "--display", dest="eventDisplay", help="store trajecto
 parser.add_argument("--stepMuonShield", dest="muShieldStepGeo", help="activate steps geometry for the muon shield", required=False, action="store_true", default=False)
 parser.add_argument("--coMuonShield", dest="muShieldWithCobaltMagnet", help="replace one of the magnets in the shield with 2.2T cobalt one, downscales other fields, works only for muShieldDesign >2", required=False, type=int, default=0)
 parser.add_argument("--MesonMother",   dest="MM",  help="Choose DP production meson source", required=False,  default=True)
+# ///////////////////////////////////////////////////////////
+
+parser.add_argument("--ScalarPortal", dest="DarkScalar",  help= "Generates dark scalars", required=False, action="store_true");
+
+# ///////////////////////////////////////////////////////////
 parser.add_argument("--debug",  help="1: print weights and field 2: make overlap check", required=False, default=0, type=int, choices=range(0,3))
 
 options = parser.parse_args()
@@ -146,6 +162,7 @@ if options.RPVSUSY: HNL = False
 if options.DarkPhoton: HNL = False
 if not options.theMass:
   if options.DarkPhoton: options.theMass  = theDPmass
+  elif options.DarkScalar:  options.theMass = theDSmass;
   else:                  options.theMass  = theHNLMass
 if options.thecouplings:
   theCouplings = [float(c) for c in options.thecouplings.split(",")]
@@ -155,11 +172,21 @@ if options.thedeccouplings:
   theDecayCouplings = [float(c) for c in options.thedeccouplings.split(",")]
 if options.testFlag:
   inputFile = "$FAIRSHIP/files/Cascade-parp16-MSTP82-1-MSEL4-76Mpot_1_5000.root"
+# ///////////////////////////////////////////////////////////
 
+if options.DarkScalar: 
+    # Set the input file (containing the heavy hadrons) for the scalar portal
+    inputFile = '/eos/experiment/ship/data/Beauty/Cascade-run0-19-parp16-MSTP82-1-MSEL5-5338Bpot.root' # Will inputFile be overwritten?
+    HNL = False;
+    
+
+# ///////////////////////////////////////////////////////////
+
+      
 
 #sanity check
-if (HNL and options.RPVSUSY) or (HNL and options.DarkPhoton) or (options.DarkPhoton and options.RPVSUSY): 
- print("cannot have HNL and SUSY or DP at the same time, abort")
+if (HNL + options.DarkScalar + options.RPVSUSY + options.DarkPhoton) != 1: #(HNL and options.RPVSUSY) or (HNL and options.DarkPhoton) or (options.DarkPhoton and options.RPVSUSY) 
+ print("Only one model should be specified: HNL, SUSY, DP or DS. Abort")
  sys.exit(2)
 
 if (simEngine == "Genie" or simEngine == "nuRadiography") and defaultInputFile: 
@@ -241,7 +268,7 @@ primGen = ROOT.FairPrimaryGenerator()
 if simEngine == "Pythia8":
  primGen.SetTarget(ship_geo.target.z0, 0.) 
 # -----Pythia8--------------------------------------
- if HNL or options.RPVSUSY:
+ if HNL or options.RPVSUSY or options.DarkPhoton or options.DarkScalar:
   P8gen = ROOT.HNLPythia8Generator()
   import pythia8_conf
   if HNL:
@@ -261,6 +288,15 @@ if simEngine == "Pythia8":
    print('and with stop mass=%.3f GeV\n'%theCouplings[2])
    pythia8_conf.configurerpvsusy(P8gen,options.theMass,[theCouplings[0],theCouplings[1]],
                                 theCouplings[2],options.RPVSUSYbench,inclusive,options.deepCopy)
+# ///////////////////////////////////////////////////////////
+
+  if options.DarkScalar:
+   print('Generating scalar portal events of mass %.3f GeV'%theDSmass)
+   from scalar_portal_conf import configure_scalar_portal
+   configure_scalar_portal(P8gen, options.theMass, theProductionCouplings, theDecayCouplings)
+
+# ///////////////////////////////////////////////////////////
+
   P8gen.SetParameters("ProcessLevel:all = off")
   if inputFile: 
    ut.checkFileExists(inputFile)
@@ -275,7 +311,8 @@ if simEngine == "Pythia8":
   import pythia8darkphoton_conf
   passDPconf = pythia8darkphoton_conf.configure(P8gen,options.theMass,options.theDPepsilon,inclusive, motherMode, options.deepCopy)
   if (passDPconf!=1): sys.exit()
- if HNL or options.RPVSUSY or options.DarkPhoton: 
+
+ if HNL or options.RPVSUSY: 
   P8gen.SetSmearBeam(1*u.cm) # finite beam size
   P8gen.SetLmin((ship_geo.Chamber1.z - ship_geo.chambers.Tub1length) - ship_geo.target.z0 )
   P8gen.SetLmax(ship_geo.TrackStation1.z - ship_geo.target.z0 )
